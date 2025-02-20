@@ -1,4 +1,6 @@
-# GNN4siRNA
+# GNN4siRNA-predict
+Original code from here: https://github.com/BCB4PM/GNN4siRNA  
+Original paper from here: https://pmc.ncbi.nlm.nih.gov/articles/PMC9696923/
 
 ## Installation and requirements
 ### requirements
