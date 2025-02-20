@@ -20,12 +20,25 @@ pyenv activate rnai
 After within the new virtual envirnment:  
 `pip install -r requirements.txt`
 
-## Running
-The original code had no way of creating the model and predicting on new data.  Since stellargraph is used, creating and saving the model, then predicting later was causing too many issues.
-Therefor with the following script the model is created, then used to predict within the same run.  Model creation is not too computationally intensive.  Additional model optimization was added to the original model generation.
-ViennaRNA will take the most time.  To run while in the environment created above:
+## Model Creation & Prediction
+
+The original code lacked functionality for creating the model and making predictions on new data. Due to compatibility challenges with StellarGraph, saving and reloading the model for later predictions caused multiple issues.
+
+To address this, the provided script creates the model and performs predictions within the same execution. Since model creation is not computationally intensive, this approach ensures smooth operation. Additionally, model optimization has been incorporated into the original model generation. The most time-consuming step will be running ViennaRNA.
+
+## Usage
+
+Run the following command within the previously created environment:  
+  
 `python predict.py --sirna_fasta <siRNA_fasta_file> --mrna_fasta <mRNA_fasta_file> --sirna_mrna_csv <csv_file>`  
-Where `<csv_file>` is a file with two columns `siRNA,mRNA` where the siRNA name used within the fasta file is in the first column and the corresponding mRNA target name from the mRNA fasta file is in the second column.  
+  
+Where `<csv_file>` is a CSV file with two columns:
+
+- siRNA: The siRNA name as used in the FASTA file.
+- mRNA: The corresponding mRNA target name from the mRNA FASTA file.
+
+This ensures correct pairing between siRNA sequences and their target mRNAs for prediction.  
+
 ## Original text
 
 GNN approach to face with the problem of siRNA-mRNA efficacy prediction.
