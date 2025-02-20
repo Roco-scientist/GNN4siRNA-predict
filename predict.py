@@ -13,6 +13,7 @@ from sklearn.metrics import mean_squared_error
 from tensorflow.keras import layers, Model, optimizers, callbacks
 from stellargraph.layer import HinSAGE
 from multiprocessing import Pool, cpu_count
+from pathlib import Path
 from Bio import BiopythonDeprecationWarning
 import warnings
 
@@ -405,9 +406,9 @@ def main():
     simmetry_correction = 0.43
 
     if ARGS.test:
-        mrna_fasta_file = "./data/raw/test/mRNA_1.fas"
-        sirna_fasta_file = "./data/raw/test/sirna_1.fas"
-        sirna_mrna_csv_file = "./data/raw/test/sirna_mrna_efficacy.csv"
+        mrna_fasta_file = Path("./data/raw/test/mRNA_1.fas")
+        sirna_fasta_file = Path("./data/raw/test/sirna_1.fas")
+        sirna_mrna_csv_file = Path("./data/raw/test/sirna_mrna_efficacy.csv")
     else:
         if ARGS.mrna_fasta is None:
             raise ValueError("mrna_fasta input required")
@@ -415,9 +416,9 @@ def main():
             raise ValueError("sirna_fasta input required")
         if ARGS.sirna_mrna_csv is None:
             raise ValueError("sirna_mrna_csv input required")
-        mrna_fasta_file = ARGS.mrna_fasta
-        sirna_fasta_file = ARGS.sirna_fasta
-        sirna_mrna_csv_file = ARGS.sirna_mrna_csv
+        mrna_fasta_file = Path(ARGS.mrna_fasta)
+        sirna_fasta_file = Path(ARGS.sirna_fasta)
+        sirna_mrna_csv_file = Path(ARGS.sirna_mrna_csv)
     records = list(SeqIO.parse(mrna_fasta_file, "fasta"))
 
     sequence_info = []
@@ -481,12 +482,17 @@ def main():
     thermo_feats_pd = pd.concat([thermo_feats_pd, rnaup.iloc[:, 1:5]], axis=1)
     thermo_feats_pd.columns = range(thermo_feats_pd.columns.size)
 
-    predict(
+    source_target["Efficacy_Prediction"] = predict(
         pd.DataFrame(data=sirna_kmers_data).set_index(0),
         pd.DataFrame(data=mrna_kmers_data).set_index(0),
         thermo_feats_pd,
         generate_model(),
     )
+
+    if not ARGS.test:
+        source_target.to_csv(
+            sirna_mrna_csv_file.with_suffix(".prediction.csv"), index=False
+        )
 
 
 if __name__ == "__main__":
