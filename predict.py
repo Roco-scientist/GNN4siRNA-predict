@@ -324,8 +324,8 @@ def predict(sirna_pd, mRNA_pd, thermo_feats_pd, model):
     return pred
 
 
-def find_rnaup(seq):
-    couple = seq[3] + "\n" + seq[1]
+def find_rnaup(sirna_seq_sense, mrna_seq):
+    couple = mrna_seq + "\n" + sirna_seq_sense
     # calling RNAup with some specifics
     proc = subprocess.Popen(
         ["RNAup", "-b", "-d2", "--noLP", "-o", "-c", "'S'", "RNAup.out"],
@@ -341,7 +341,7 @@ def find_rnaup(seq):
         s = s[s.find(start) + len(start) : s.rfind(end)]
         s = s.replace("=", "").replace("+", "")
         s = list(map(float, s.split()))
-        return [seq[0], s[0], s[2], s[3]]
+        return [s[0], s[2], s[3]]
 
     except subprocess.TimeoutExpired:
         proc.kill()
@@ -392,6 +392,14 @@ def cal_thermo_feature(
     return single_sum
 
 
+def create_thermo_pd_row(sequence_info):
+    sirna_id, mrna_id, sirna_seq_sense, mrna_sequence = sequence_info
+    row = [sirna_id, mrna_id]
+    row.extend(cal_thermo_feature(sirna_seq_sense.reverse_complement_rna()[:19]))
+    row.extend(find_rnaup(sirna_seq_sense, mrna_sequence))
+    return row
+
+
 def main():
     k_sirna = 3
     k_mrna = 4
@@ -400,10 +408,6 @@ def main():
 
     sirna_kmers_data = []
     mrna_kmers_data = []
-
-    total_compute = []
-    intermolecular_initiation = 4.09
-    simmetry_correction = 0.43
 
     if ARGS.test:
         mrna_fasta_file = Path("./data/raw/test/mRNA_1.fas")
@@ -419,68 +423,47 @@ def main():
         mrna_fasta_file = Path(ARGS.mrna_fasta)
         sirna_fasta_file = Path(ARGS.sirna_fasta)
         sirna_mrna_csv_file = Path(ARGS.sirna_mrna_csv)
-    records = list(SeqIO.parse(mrna_fasta_file, "fasta"))
+    source_target = pd.read_csv(sirna_mrna_csv_file)
+
+    source_target_dict = {
+        siRNA: target
+        for siRNA, target in zip(source_target.iloc[:, 0], source_target.iloc[:, 1])
+    }
+    mrna_records = {}
+    for seq_record in SeqIO.parse(mrna_fasta_file, "fasta"):
+        mrna_records[seq_record.id] = seq_record.seq.back_transcribe().upper()
 
     sequence_info = []
     # create sirna k-mer file
     for seq_record in SeqIO.parse(sirna_fasta_file, "fasta"):  # input fasta file
         rna_id = seq_record.id
-        seq = seq_record.seq
-        seq = seq.upper()
-        seq = seq.replace("U", "T")
-        k = kmer_sirna.obtain_kmer_feature_for_one_sequence(seq, True)
+        sirna_antisense = seq_record.seq.back_transcribe().upper()
+        k = kmer_sirna.obtain_kmer_feature_for_one_sequence(sirna_antisense, True)
         k = [int(elem) for elem in k]
         k = [str(elem) for elem in k]
         k.insert(0, str(rna_id))
         sirna_kmers_data.append(k)
 
-        sequence = seq_record.seq
-        sequence = sequence[:19]
-        seq_id = seq_record.id
-
-        single_sum = cal_thermo_feature(sequence)
-        single_sum.insert(0, seq_id)
-        total_compute.append(single_sum)
-
-        sir = seq_record.seq.upper().replace("U", "T")
-        sir_id = seq_record.id
-        rev = Seq.reverse_complement(sir)
-        for r in records:
-            if rev in r.seq:
-                sequence_info.append([sir_id, rev, r.id, r.seq])
-
-    # create mRNA k-mer file
-    for seq_record in records:  # input fasta file
-        rna_id = seq_record.id
-        seq = seq_record.seq
-        seq = seq.upper()
-        seq = seq.replace("U", "T")
-        k = kmer_mrna.obtain_kmer_feature_for_one_sequence(seq, True)
-        k = [int(elem) for elem in k]
-        k = [str(elem) for elem in k]
-        k.insert(0, str(rna_id))
-        mrna_kmers_data.append(k)
+        sirna_sense = sirna_antisense.reverse_complement()
+        mrna_id = source_target_dict[rna_id]
+        mrna_seq = mrna_records[mrna_id]
+        if sirna_sense in mrna_seq:
+            sequence_info.append([rna_id, mrna_id, sirna_sense, mrna_seq])
 
     # python bash script to calculate all the interactions
-    print("Finding RNAup energy.  May take awhile")
+    print("\nFinding thermo properties.  May take awhile\n")
     with Pool(ARGS.threads) as pool:
-        rnaup_data = pool.map(find_rnaup, sequence_info)
+        thermo_rows = pool.map(create_thermo_pd_row, sequence_info)
 
-    thermo = pd.DataFrame(total_compute)
-    rnaup = pd.DataFrame(rnaup_data)
+    thermo_feats_pd = pd.DataFrame(thermo_rows)
 
-    thermo_feats_pd = pd.DataFrame()
-    source_target = pd.read_csv(sirna_mrna_csv_file, header=0)
-    thermo_feats_pd = pd.concat(
-        [thermo_feats_pd, source_target.iloc[:, 0:2]],
-        axis=1,
-    )
-    thermo_feats_pd = pd.concat(
-        [thermo_feats_pd, thermo.iloc[:, 1:20]],
-        axis=1,
-    )
-    thermo_feats_pd = pd.concat([thermo_feats_pd, rnaup.iloc[:, 1:5]], axis=1)
-    thermo_feats_pd.columns = range(thermo_feats_pd.columns.size)
+    # create mRNA k-mer file
+    for mrna_id, mrna_seq in mrna_records.items():
+        k = kmer_mrna.obtain_kmer_feature_for_one_sequence(mrna_seq, True)
+        k = [int(elem) for elem in k]
+        k = [str(elem) for elem in k]
+        k.insert(0, str(mrna_id))
+        mrna_kmers_data.append(k)
 
     source_target["Efficacy_Prediction"] = predict(
         pd.DataFrame(data=sirna_kmers_data).set_index(0),
