@@ -2,3 +2,4 @@ tensorflow==2.1.0
 stellargraph==1.2.1
 biopython==1.79
 h5py==2.10.0
+chardet==5.0.0
