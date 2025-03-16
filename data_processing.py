@@ -23,21 +23,21 @@ def get_input_data(
         seq_record.id: seq_record
         for seq_record in SeqIO.parse(siRNA_antisense_fasta_file, "fasta")
     }
-    
+
     mrna_seqs = {
         seq_record.id: seq_record
         for seq_record in SeqIO.parse(mRNA_fasta_file, "fasta")
     }
 
     x = {}
-    x["Thermo_Features"] = (
-        pd.read_csv(thermo_features, header=None)
-    )
+    x["Thermo_Features"] = pd.read_csv(thermo_features, header=None)
     x["siRNA_kmers"] = [
         siRNA(rnai_antisense_seqs[rnai_id]).kmer_data() for rnai_id, _ in sirna_mrna
     ]
 
-    x["mRNA_kmers"] = [mRNA(mrna_seqs[mrna_id]).kmer_data() for _, mrna_id in sirna_mrna]
+    x["mRNA_kmers"] = [
+        mRNA(mrna_seqs[mrna_id]).kmer_data() for _, mrna_id in sirna_mrna
+    ]
     return (x, y, sirna_mrna)
 
 
@@ -84,13 +84,14 @@ def get_gene_indexes(folds, source):
         )
         return split_indexes
 
+
 def get_split_data(
     thermo_features,
     siRNA_antisense_fasta_file,
     mRNA_fasta_file,
     efficacy_file,
     folds,
-    by_gene = True,
+    by_gene=True,
 ):
     x, y, sirna_mrna = get_input_data(
         thermo_features,
@@ -106,7 +107,7 @@ def get_split_data(
         kf = KFold(n_splits=folds, shuffle=True, random_state=42)
         index_list = list(range(len(source)))
         for _, test_index in kf.split(index_list):
-            split_indexes.append([x in test_index for x in index_list ])
+            split_indexes.append([x in test_index for x in index_list])
     return x, y, split_indexes
 
 
