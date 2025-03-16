@@ -4,6 +4,7 @@ import random
 
 from Bio import SeqIO
 from features import siRNA, mRNA
+from sklearn.model_selection import KFold
 
 
 def get_input_data(
@@ -30,7 +31,7 @@ def get_input_data(
 
     x = {}
     x["Thermo_Features"] = (
-        pd.read_csv(thermo_features, header=None).drop(columns=[0, 1]).to_numpy()
+        pd.read_csv(thermo_features, header=None)
     )
     x["siRNA_kmers"] = [
         siRNA(rnai_antisense_seqs[rnai_id]).kmer_data() for rnai_id, _ in sirna_mrna
@@ -40,20 +41,7 @@ def get_input_data(
     return (x, y, sirna_mrna)
 
 
-def get_split_data_gene(
-    thermo_features,
-    siRNA_antisense_fasta_file,
-    mRNA_fasta_file,
-    efficacy_file,
-    folds,
-):
-    x, y, sirna_mrna = get_input_data(
-        thermo_features,
-        siRNA_antisense_fasta_file,
-        efficacy_file,
-        mRNA_fasta_file,
-    )
-    source = list(sirna_mrna[:, 1])
+def get_gene_indexes(folds, source):
     total_samples = len(source)
     gene_occurrances = np.unique(source, return_counts=True)
     proportion_each_gene = {
@@ -94,6 +82,31 @@ def get_split_data_gene(
         print(
             f"Split proportion of {round(split_proportion, 4)} for split {len(split_indexes)}"
         )
+        return split_indexes
+
+def get_split_data(
+    thermo_features,
+    siRNA_antisense_fasta_file,
+    mRNA_fasta_file,
+    efficacy_file,
+    folds,
+    by_gene = True,
+):
+    x, y, sirna_mrna = get_input_data(
+        thermo_features,
+        siRNA_antisense_fasta_file,
+        efficacy_file,
+        mRNA_fasta_file,
+    )
+    source = list(sirna_mrna[:, 1])
+    if by_gene:
+        split_indexes = get_gene_indexes(folds, source)
+    else:
+        split_indexes = []
+        kf = KFold(n_splits=folds, shuffle=True, random_state=42)
+        index_list = list(range(len(source)))
+        for _, test_index in kf.split(index_list):
+            split_indexes.append([x in test_index for x in index_list ])
     return x, y, split_indexes
 
 
@@ -103,7 +116,7 @@ def get_split_data_gene_model(
     mRNA_fasta_file,
     efficacy_file,
 ):
-    x, y, split_indexes = get_split_data_gene(
+    x, y, split_indexes = get_split_data(
         5,
         thermo_features,
         siRNA_antisense_fasta_file,
