@@ -1,7 +1,9 @@
 import argparse
+import numpy as np
 import pandas as pd
 import scipy
 import stellargraph
+import tensorflow as tf
 import warnings
 import pdb
 
@@ -10,7 +12,6 @@ from data_processing import get_split_data, get_split_data_gene_model, index_x
 from features import siRNA, mRNA
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 from stellargraph.mapper import HinSAGENodeGenerator
 from stellargraph.layer import HinSAGE
@@ -44,10 +45,15 @@ def arguments():
         action="store_true",
         help="Test code",
     )
+    args.add_argument(
+        "--random_split",
+        action="store_true",
+        help="Split hold out and validation sets randomly instead of by gene",
+    )
     return args.parse_args()
 
 
-def create_generator(thermo_feats_pd, sirna_pd, mrna_pd, y=None, train=False):
+def create_generator(thermo_feats_pd, sirna_pd, mrna_pd):
     thermo_feats_pd.rename(columns={0: "source", 1: "target"}, inplace=True)
     interaction_pd = thermo_feats_pd.drop(["source", "target"], axis=1)
     interactions = list(
@@ -92,34 +98,48 @@ def create_generator(thermo_feats_pd, sirna_pd, mrna_pd, y=None, train=False):
     generator = HinSAGENodeGenerator(
         my_stellar_graph, batch_size, hop_samples, head_node_type="interaction"
     )
-    if y is None:
-        return generator, generator.flow(interactions, shuffle=train)
-    else:
-        return generator, generator.flow(interactions, y, shuffle=train)
+    return generator
 
 
 def generate_model(
-    x_train, y_train, x_validate, y_validate, x_hold_out=None, y_hold_out=None
+    x_train, y_train, x_validate, y_validate, x_hold_out=None, y_hold_out=None, x_predict=None
 ):
     # k-mers of siRNA sequences
-    sirna_pd_train = pd.DataFrame(data=x_train["siRNA_kmers"])
-    sirna_pd_train = sirna_pd_train.set_index(0)
+    sirna_kmer_data = x_train["siRNA_kmers"]
+    sirna_kmer_data.extend(x_validate["siRNA_kmers"])
+
+    mrna_kmer_data = x_train["mRNA_kmers"]
+    mrna_kmer_data.extend(x_validate["mRNA_kmers"])
+
+    thermo_pd = pd.concat([x_train["Thermo_Features"], x_validate["Thermo_Features"]], ignore_index=True, sort=False)
+    if x_hold_out is not None:
+        sirna_kmer_data.extend(x_hold_out["siRNA_kmers"])
+        mrna_kmer_data.extend(x_hold_out["mRNA_kmers"])
+        thermo_pd = pd.concat([thermo_pd, x_hold_out["Thermo_Features"]], ignore_index=True, sort=False)
+
+    if x_predict is not None:
+        sirna_kmer_data.extend(x_predict["siRNA_kmers"])
+        mrna_kmer_data.extend(x_predict["mRNA_kmers"])
+        thermo_pd = pd.concat([thermo_pd, x_predict["Thermo_Features"]], ignore_index=True, sort=False)
+
+    sirna_pd = pd.DataFrame(data=sirna_kmer_data).drop_duplicates(subset=[0])
+    sirna_pd = sirna_pd.set_index(0)
     # k-mers of mRNA sequences
-    mRNA_pd_train = pd.DataFrame(data=x_train["mRNA_kmers"])
-    mRNA_pd_train = mRNA_pd_train.set_index(0)
-    generator, train_gen = create_generator(
-        x_train["Thermo_Features"], sirna_pd_train, mRNA_pd_train, y=y_train, train=True
+    mRNA_pd = pd.DataFrame(data=mrna_kmer_data).drop_duplicates(subset=[0])
+    mRNA_pd = mRNA_pd.set_index(0)
+    generator = create_generator(
+        thermo_pd, sirna_pd, mRNA_pd
     )
 
-    # k-mers of siRNA sequences
-    sirna_pd_validate = pd.DataFrame(data=x_validate["siRNA_kmers"])
-    sirna_pd_validate = sirna_pd_validate.set_index(0)
-    # k-mers of mRNA sequences
-    mRNA_pd_validate = pd.DataFrame(data=x_validate["mRNA_kmers"])
-    mRNA_pd_validate = mRNA_pd_validate.set_index(0)
-    _, validate_gen = create_generator(
-        x_validate["Thermo_Features"], sirna_pd_validate, mRNA_pd_validate, y=y_validate
+    interactions_train = list(
+            x_train["Thermo_Features"].iloc[:, 0].astype(str) + "_" + x_train["Thermo_Features"].iloc[:,1]
     )
+    train_gen = generator.flow(interactions_train, y_train, shuffle=True)
+
+    interactions_validate = list(
+            x_validate["Thermo_Features"].iloc[:, 0].astype(str) + "_" + x_validate["Thermo_Features"].iloc[:,1]
+    )
+    validate_gen = generator.flow(interactions_validate, y_validate, shuffle=False)
 
     ################################################
     # Create the model
@@ -144,8 +164,8 @@ def generate_model(
     # Train the model, keeping track of its loss and accuracy on the training set,
     # and its generalisation performance on the test set
 
-    reduce_lr = callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10)
-    early_stop = callbacks.EarlyStopping(monitor="val_loss", patience=15)
+    reduce_lr = ReduceLROnPlateauWithBestWeights(monitor="val_loss", factor=0.5, patience=10)
+    early_stop = callbacks.EarlyStopping(monitor="val_loss", patience=15, restore_best_weights=True)
     model.fit(
         train_gen,
         epochs=1000,
@@ -156,18 +176,10 @@ def generate_model(
     )
 
     if ARGS.evaluate:
-        # k-mers of siRNA sequences
-        sirna_pd_hold_out = pd.DataFrame(data=x_hold_out["siRNA_kmers"])
-        sirna_pd_hold_out = sirna_pd_hold_out.set_index(0)
-        # k-mers of mRNA sequences
-        mRNA_pd_hold_out = pd.DataFrame(data=x_hold_out["mRNA_kmers"])
-        mRNA_pd_hold_out = mRNA_pd_hold_out.set_index(0)
-        _, hold_out_gen = create_generator(
-            x_hold_out["Thermo_Features"],
-            sirna_pd_hold_out,
-            mRNA_pd_hold_out,
-            y=y_hold_out,
+        interactions_hold_out = list(
+                x_hold_out["Thermo_Features"].iloc[:, 0].astype(str) + "_" + x_hold_out["Thermo_Features"].iloc[:,1]
         )
+        hold_out_gen = generator.flow(interactions_hold_out, shuffle=False)
 
         pred = model.predict(hold_out_gen).flatten()
 
@@ -186,23 +198,86 @@ def generate_model(
         print("Model MSE: " + str(mse))
         print("Model PCC: " + str(pcc))
         return r2, mse, pcc, r2_val, mse_val, pcc_val
+    if x_predict is not None:
+        interactions_predict = list(
+                x_predict["Thermo_Features"].iloc[:, 0].astype(str) + "_" + x_predict["Thermo_Features"].iloc[:,1]
+        )
+        pred_gen = generator.flow(interactions_predict, shuffle=False)
+        pred = model.predict(pred_gen)
+        if ARGS.test:
+            print(
+                "MSE: "
+                + str(
+                    mean_squared_error(
+                        pd.read_csv("./data/raw/test/sirna_mrna_efficacy.csv").efficacy,
+                        pred,
+                    )
+                )
+            )
+        return [round(prediction, 5) for prediction in pred.flatten()]
     return model
 
 
-def predict(sirna_pd, mrna_pd, thermo_feats_pd, model):
-    _, pred_gen = create_generator(thermo_feats_pd, sirna_pd, mrna_pd)
-    pred = model.predict(pred_gen)
-    if ARGS.test:
-        print(
-            "MSE: "
-            + str(
-                mean_squared_error(
-                    pd.read_csv("./data/raw/test/sirna_mrna_efficacy.csv").efficacy,
-                    pred,
-                )
-            )
+class ReduceLROnPlateauWithBestWeights(callbacks.ReduceLROnPlateau):
+    def __init__(
+        self,
+        monitor="val_loss",
+        factor=0.1,
+        patience=10,
+        verbose=0,
+        mode="auto",
+        min_delta=1e-4,
+        cooldown=0,
+        min_lr=0,
+        restore_best_weights=True,
+    ):
+        super().__init__(
+            monitor=monitor,
+            factor=factor,
+            patience=patience,
+            verbose=verbose,
+            mode=mode,
+            min_delta=min_delta,
+            cooldown=cooldown,
+            min_lr=min_lr,
         )
-    return pred
+        self.restore_best_weights = restore_best_weights
+        self.best_weights = None
+        self.best_loss = np.inf if self.mode == "min" else -np.inf
+
+    def on_train_begin(self, logs=None):
+        self.best_weights = None
+        self.best_loss = np.inf if self.mode == "min" else -np.inf
+        super().on_train_begin(logs)
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        current_loss = logs.get(self.monitor)
+
+        if current_loss is None:
+            return
+
+        # Save best weights
+        if (self.mode == "min" and current_loss < self.best_loss - self.min_delta) or (
+            self.mode == "max" and current_loss > self.best_loss + self.min_delta
+        ):
+            self.best_loss = current_loss
+            self.best_weights = self.model.get_weights()
+
+        old_lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+        super().on_epoch_end(epoch, logs)
+        new_lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+
+        # Restore best weights if LR is reduced
+        if (
+            self.restore_best_weights
+            and new_lr < old_lr
+            and self.best_weights is not None
+        ):
+            if self.verbose > 0:
+                print("Restoring best weights from epoch with lowest monitored loss")
+            self.model.set_weights(self.best_weights)
+
 
 
 def create_thermo_pd_row(sirna_mrna):
@@ -222,6 +297,7 @@ def main():
             mRNA_fasta_file,
             efficacy_file,
             folds=6,
+            by_gene= not ARGS.random_split,
         )
         results_file_path = Path("./accuracy.csv")
         with open(results_file_path, "w") as results_file:
@@ -255,6 +331,7 @@ def main():
                             f"{hold_out_set + 1},{validation_set + 1},{r2},{mse},{pcc},{r2_val},{mse_val},{pcc_val}\n"
                         )
     else:
+        x_predict = {}
         if ARGS.test:
             mrna_fasta_file = Path("./data/raw/test/mRNA_1.fas")
             sirna_fasta_file = Path("./data/raw/test/sirna_1.fas")
@@ -297,7 +374,6 @@ def main():
         with Pool(ARGS.threads) as pool:
             thermo_rows = pool.map(create_thermo_pd_row, sirna_mrna)
 
-        thermo_feats_pd = pd.DataFrame(thermo_rows)
 
         x_train, y_train, x_validate, y_validate = get_split_data_gene_model(
             thermo_features_file,
@@ -305,12 +381,11 @@ def main():
             mRNA_fasta_file,
             efficacy_file,
         )
-        model = generate_model(x_train, y_train, x_validate, y_validate)
-        source_target["Efficacy_Prediction"] = predict(
-            pd.DataFrame(data=sirna_kmers_data).set_index(0),
-            pd.DataFrame(data=mrna_kmers_data).set_index(0),
-            thermo_feats_pd,
-            model,
+        x_predict["Thermo_Features"] = pd.DataFrame(thermo_rows)
+        x_predict["siRNA_kmers"] = pd.DataFrame(sirna_kmers_data)
+        x_predict["mRNA_kmers"] = pd.DataFrame(mrna_kmers_data)
+        source_target["Efficacy_Prediction"] = generate_model(
+            x_train, y_train, x_validate, y_validate, x_predict=x_predict
         )
 
         if not ARGS.test:
