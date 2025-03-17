@@ -23,3 +23,6 @@ p <- ggplot(random_split_data, aes(x = Measurement, y = Value)) +
   labs(x = "", y = "", title = "Random Split")
 p
 ggsave("./GNN4siRNA-predict/accuracy.random.svg")
+
+median(random_split_data$Value[random_split_data$Measurement == "R2_Validation"])
+median(gene_split_data$Value[gene_split_data$Measurement == "R2_HoldOut"])
