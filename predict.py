@@ -332,7 +332,7 @@ def evaluate_model(
 
     with open(results_file_path, "w") as results_file:
         results_file.write(
-            "HoldOut,Validation,R2_HoldOut,MSE_HoldOut,PCC_HoldOut,R2_Validation,MSE_Validation,PCC_Validation "
+            "HoldOut,Validation,R2_HoldOut,MSE_HoldOut,PCC_HoldOut,R2_Validation,MSE_Validation,PCC_Validation\n"
         )
 
     for hold_out_set, hold_out_indexes in enumerate(split_indexes):
@@ -361,7 +361,7 @@ def evaluate_model(
 
                 with open(results_file_path, "a") as results_file:
                     results_file.write(
-                        f"{hold_out_set + 1},{validation_set + 1},{r2},{mse},{pcc},{r2_val},{mse_val},{pcc_val}"
+                        f"{hold_out_set + 1},{validation_set + 1},{r2},{mse},{pcc},{r2_val},{mse_val},{pcc_val}\n"
                     )
 
 
