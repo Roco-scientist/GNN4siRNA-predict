@@ -13,36 +13,12 @@ class kmer_featurization:
             k (int): The k-mer length.
         """
         self.k = k
-        self.letters = ["A", "T", "C", "G"]
+        self.letters = {"A": 0, "T": 1, "U": 1, "C": 2, "G": 3}
         self.multiplyBy = 4 ** np.arange(
             k - 1, -1, -1
         )  # the multiplying number for each digit position in the k-number system
         self.n = 4**k  # number of possible k-mers
         self.seq = None
-
-    def obtain_kmer_feature_for_a_list_of_sequences(
-        self, seqs, write_number_of_occurrences=False
-    ):
-        """
-        Convert a list of DNA sequences into k-mer feature vectors.
-
-        Args:
-            seqs (list[str]): List of DNA sequences.
-            count_occurrences (bool): If True, counts occurrences instead of frequencies.
-
-        Returns:
-            np.ndarray: Feature matrix of shape (len(seqs), 4**k).
-        """
-        kmer_features = []
-        for seq in seqs:
-            this_kmer_feature = self.obtain_kmer_feature_for_one_sequence(
-                seq.upper(), write_number_of_occurrences=write_number_of_occurrences
-            )
-            kmer_features.append(this_kmer_feature)
-
-        kmer_features = np.array(kmer_features)
-
-        return kmer_features
 
     def obtain_kmer_feature_for_one_sequence(self, write_number_of_occurrences=False):
         """
@@ -62,7 +38,7 @@ class kmer_featurization:
             this_kmer = self.seq[i : (i + self.k)]
             ok = True
             for letter in this_kmer:
-                if letter not in self.letters:
+                if letter not in self.letters.keys():
                     ok = False
             if ok:
                 this_numbering = self.kmer_numbering_for_one_kmer(this_kmer)
@@ -80,7 +56,7 @@ class kmer_featurization:
         digits = []
         for letter in kmer:
 
-            digits.append(self.letters.index(letter))
+            digits.append(self.letters[letter])
 
         digits = np.array(digits)
 
@@ -95,7 +71,6 @@ class kmer_featurization:
         if include_index:
             k.insert(0, str(self.id))
         return k
-
 
 class mRNA(kmer_featurization):
     def __init__(self, seq_record):
