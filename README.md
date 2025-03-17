@@ -94,7 +94,7 @@ python predict.py --evaluate --random_split
 
 #### Key Findings:  
 - **Random Splitting (Validation R² ≈ 0.47)**: Matches the original paper’s results.  
-- **Hold-out Set Evaluation (R² ≈ -0.058)**: Performance drops significantly when predicting on unseen genes.  
+- **Gene Splitting (Hold-out R² ≈ -0.058)**: Performance drops significantly when predicting on unseen genes.  
 
 #### Interpretation:  
 Since the model is based on a **graph architecture** where siRNA and mRNA are treated as **nodes** with interactions as **edges**, it struggles to generalize when encountering genes it hasn't seen before. **This suggests that the model is best suited for predicting efficacy when the target gene is present in the training dataset.**  
