@@ -5,13 +5,14 @@ import random
 from Bio import SeqIO
 from features import siRNA, mRNA
 from sklearn.model_selection import KFold
+import pdb
 
 
 def get_input_data(
     thermo_features,
     siRNA_antisense_fasta_file,
-    efficacy_file,
     mRNA_fasta_file,
+    efficacy_file,
 ):
     efficacy_data = pd.read_csv(efficacy_file)
     y = efficacy_data.efficacy.to_numpy()
@@ -24,11 +25,6 @@ def get_input_data(
         for seq_record in SeqIO.parse(siRNA_antisense_fasta_file, "fasta")
     }
 
-    mrna_seqs = {
-        seq_record.id: seq_record
-        for seq_record in SeqIO.parse(mRNA_fasta_file, "fasta")
-    }
-
     x = {}
     x["Thermo_Features"] = pd.read_csv(thermo_features, header=None)
     x["siRNA_kmers"] = [
@@ -36,7 +32,7 @@ def get_input_data(
     ]
 
     x["mRNA_kmers"] = [
-        mRNA(mrna_seqs[mrna_id]).kmer_data() for _, mrna_id in sirna_mrna
+        mRNA(mrna_record).kmer_data() for mrna_record in SeqIO.parse(mRNA_fasta_file, "fasta")
     ]
     return (x, y, sirna_mrna)
 
@@ -82,7 +78,7 @@ def get_gene_indexes(folds, source):
         print(
             f"Split proportion of {round(split_proportion, 4)} for split {len(split_indexes)}"
         )
-        return split_indexes
+    return split_indexes
 
 
 def get_split_data(
@@ -96,8 +92,8 @@ def get_split_data(
     x, y, sirna_mrna = get_input_data(
         thermo_features,
         siRNA_antisense_fasta_file,
-        efficacy_file,
         mRNA_fasta_file,
+        efficacy_file,
     )
     source = list(sirna_mrna[:, 1])
     if by_gene:
@@ -106,9 +102,19 @@ def get_split_data(
         split_indexes = []
         kf = KFold(n_splits=folds, shuffle=True, random_state=42)
         index_list = list(range(len(source)))
-        for _, test_index in kf.split(index_list):
-            split_indexes.append([x in test_index for x in index_list])
-    return x, y, split_indexes
+        for _, validation_index in kf.split(index_list):
+            split_indexes.append([x in validation_index for x in index_list])
+    return x, y, split_indexes, sirna_mrna
+
+
+def index_x(x, indexes, sirna_mrna):
+    x_subset = {}
+    x_subset["Thermo_Features"] = x["Thermo_Features"].loc[indexes]
+    x_subset["siRNA_kmers"] = [selected for selected, flag in zip (x["siRNA_kmers"], indexes) if flag]
+    train_sirnas = [sirna_data[0] for sirna_data in x_subset["siRNA_kmers"]]
+    train_mrnas = [mrna_id for sirna_id, mrna_id in sirna_mrna if sirna_id in train_sirnas]
+    x_subset["mRNA_kmers"] = [mrna_data for mrna_data in x["mRNA_kmers"] if mrna_data[0] in train_mrnas]
+    return x_subset
 
 
 def get_split_data_gene_model(
@@ -117,17 +123,17 @@ def get_split_data_gene_model(
     mRNA_fasta_file,
     efficacy_file,
 ):
-    x, y, split_indexes = get_split_data(
-        5,
+    x, y, split_indexes, sirna_mrna = get_split_data(
         thermo_features,
         siRNA_antisense_fasta_file,
         mRNA_fasta_file,
         efficacy_file,
+        5,
     )
-    test_indexes = split_indexes[3]  # make sure the test is not GFP
-    train_indexes = [not x for x in test_indexes]
-    x_train = {key: x[key][train_indexes] for key in x.keys()}
-    x_validate = {key: x[key][test_indexes] for key in x.keys()}
+    validation_indexes = split_indexes[3]  # make sure the validation is not GFP
+    train_indexes = [not x for x in validation_indexes]
+    x_train = index_x(x, train_indexes, sirna_mrna)
+    x_validate = index_x(x, validation_indexes, sirna_mrna)
     y_train = y[train_indexes]
-    y_validate = y[test_indexes]
+    y_validate = y[validation_indexes]
     return x_train, y_train, x_validate, y_validate
