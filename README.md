@@ -32,16 +32,36 @@ To address this, the provided script creates the model and performs predictions 
 
 Run the following command within the previously created environment:  
   
-`python predict.py --sirna_fasta <siRNA_fasta_file> --mrna_fasta <mRNA_fasta_file> --sirna_mrna_csv <csv_file>`  
+```
+python predict.py --sirna_fasta <siRNA_fasta_file> --mrna_fasta <mRNA_fasta_file> --sirna_mrna_csv <csv_file>
+```  
   
 Where `<csv_file>` is a CSV file with two columns:
 
-- siRNA: The siRNA name as used in the FASTA file.
+- siRNA: The siRNA name as used in the FASTA file in the same order as the FASTA file.
 - mRNA: The corresponding mRNA target name from the mRNA FASTA file.
 
 This ensures correct pairing between siRNA sequences and their target mRNAs for prediction.  
+The output will be to `<csv_file>.prediction.csv`
 
+## Evaluation
+
+Model evaluation was added with comparing two different data split methods:
+- Split by gene
+- Split randomly as in the original code and paper  
+
+Additionally, a hold out set is used to evaluate the model, which is done with a 6 fold strategy where one fold is the hold-out, one is the validation set, and the rest are for the training set.  This creates 30 MSE, R2, and PCC values: 6 hold-outs x 5 fold cross validation.  
+To run validation with splitting by gene:    
+```
+python predict.py --evaluate
+```
+To run validation with random splitting:     
+```
+python predict.py --evaluate --random_split
+```
 ## Original text
+Original code from here: https://github.com/BCB4PM/GNN4siRNA  
+Original paper from here: https://pmc.ncbi.nlm.nih.gov/articles/PMC9696923/
 
 GNN approach to face with the problem of siRNA-mRNA efficacy prediction.
 

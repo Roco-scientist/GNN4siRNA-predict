@@ -1,21 +1,21 @@
+import argparse
 import numpy as np
 import pandas as pd
-from Bio import SeqIO
-from Bio.Seq import Seq
-import subprocess
-import argparse
-import stellargraph as StellarGraph
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
-import stellargraph as StellarGraph
-from stellargraph.mapper import HinSAGENodeGenerator
-from sklearn.metrics import mean_squared_error
-from tensorflow.keras import layers, Model, optimizers, callbacks
-from stellargraph.layer import HinSAGE
+import scipy
+import stellargraph
+import tensorflow as tf
+import warnings
+import pdb
+
+from Bio import BiopythonDeprecationWarning, SeqIO
+from data_processing import get_split_data, get_split_data_gene_model, index_x
+from features import siRNA, mRNA
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
-from Bio import BiopythonDeprecationWarning
-import warnings
+from sklearn.metrics import mean_squared_error, r2_score
+from stellargraph.mapper import HinSAGENodeGenerator
+from stellargraph.layer import HinSAGE
+from tensorflow.keras import layers, Model, optimizers, callbacks
 
 warnings.filterwarnings("ignore", category=BiopythonDeprecationWarning)
 
@@ -40,148 +40,35 @@ def arguments():
         action="store_true",
         help="Test code",
     )
+    args.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="Test code",
+    )
+    args.add_argument(
+        "--random_split",
+        action="store_true",
+        help="Split hold out and validation sets randomly instead of by gene",
+    )
     return args.parse_args()
 
 
-class kmer_featurization:
-    def __init__(self, k):
-        """
-        seqs: a list of DNA sequences
-        k: the "k" in k-mer
-        """
-        self.k = k
-        self.letters = ["A", "T", "C", "G"]
-        self.multiplyBy = 4 ** np.arange(
-            k - 1, -1, -1
-        )  # the multiplying number for each digit position in the k-number system
-        self.n = 4**k  # number of possible k-mers
-
-    def obtain_kmer_feature_for_a_list_of_sequences(
-        self, seqs, write_number_of_occurrences=False
-    ):
-        """
-        Given a list of m DNA sequences, return a 2-d array with shape (m, 4**k) for the 1-hot representation of the kmer features.
-
-        Args:
-          write_number_of_occurrences:
-            a boolean. If False, then in the 1-hot representation, the percentage of the occurrence of a kmer will be recorded; otherwise the number of occurrences will be recorded. Default False.
-        """
-        kmer_features = []
-        for seq in seqs:
-            this_kmer_feature = self.obtain_kmer_feature_for_one_sequence(
-                seq.upper(), write_number_of_occurrences=write_number_of_occurrences
-            )
-            kmer_features.append(this_kmer_feature)
-
-        kmer_features = np.array(kmer_features)
-
-        return kmer_features
-
-    def obtain_kmer_feature_for_one_sequence(
-        self, seq, write_number_of_occurrences=False
-    ):
-        """
-        Given a DNA sequence, return the 1-hot representation of its kmer feature.
-
-        Args:
-          seq:
-            a string, a DNA sequence
-          write_number_of_occurrences:
-            a boolean. If False, then in the 1-hot representation, the percentage of the occurrence of a kmer will be recorded; otherwise the number of occurrences will be recorded. Default False.
-        """
-        number_of_kmers = len(seq) - self.k + 1
-
-        kmer_feature = np.zeros(self.n)
-
-        for i in range(number_of_kmers):
-            this_kmer = seq[i : (i + self.k)]
-            ok = True
-            for letter in this_kmer:
-                if letter not in self.letters:
-                    ok = False
-            if ok:
-                this_numbering = self.kmer_numbering_for_one_kmer(this_kmer)
-                kmer_feature[this_numbering] += 1
-
-        if not write_number_of_occurrences:
-            kmer_feature = kmer_feature / number_of_kmers
-
-        return kmer_feature
-
-    def kmer_numbering_for_one_kmer(self, kmer):
-        """
-        Given a k-mer, return its numbering (the 0-based position in 1-hot representation)
-        """
-        digits = []
-        for letter in kmer:
-
-            digits.append(self.letters.index(letter))
-
-        digits = np.array(digits)
-
-        numbering = (digits * self.multiplyBy).sum()
-
-        return numbering
-
-
-def build_kmers(sequence):
-    kmers = []
-    n_kmers = len(sequence) - 1
-
-    for i in range(n_kmers):
-        kmer = sequence[i : i + 2]
-        kmers.append(kmer)
-    return kmers
-
-
-def generate_model():
-    # k-mers of siRNA sequences
-    sirna_kmer_file = "./data/processed/dataset_2/sirna_kmers.txt"
-    # k-mers of mRNA sequences
-    mrna_kmer_file = "./data/processed/dataset_2/target_kmers.txt"
-    # thermodynamic features of siRNA-mRNA interaction
-    sirna_target_thermo_file = "./data/processed/dataset_2/sirna_target_thermo.csv"
-    # sirna_efficacy_values
-    sirna_efficacy_file = "./data/processed/dataset_2/sirna_mrna_efficacy.csv"
-
-    #############################################
-    # import file with sirna / target thermodynamic features
-    #############################################
-
-    # k-mers of siRNA sequences
-    sirna_pd = pd.read_csv(sirna_kmer_file, header=None)
-    sirna_pd = sirna_pd.set_index(0)
-
-    # k-mers of mRNA sequences
-    mRNA_pd = pd.read_csv(mrna_kmer_file, header=None)
-    mRNA_pd = mRNA_pd.set_index(0)
-
-    # thermodynamic features of siRNA-mRNA interaction
-    thermo_feats_pd = pd.read_csv(sirna_target_thermo_file, header=None)
-
-    # sirna_efficacy_values
-    sirna_efficacy_pd = pd.read_csv(sirna_efficacy_file)
-
-    # rename first 2 columns in "source" and "target"
+def create_generator(thermo_feats_pd, sirna_pd, mrna_pd):
     thermo_feats_pd.rename(columns={0: "source", 1: "target"}, inplace=True)
-
-    # Here we transform interaction edges in "interaction nodes"
-    # Intercation node has 2 edges that connect it to siRNA and mRNA, respectively
-    # Node ID cames from source and target ids
     interaction_pd = thermo_feats_pd.drop(["source", "target"], axis=1)
-    interaction_pd["index"] = (
+    interactions = list(
         thermo_feats_pd["source"].astype(str) + "_" + thermo_feats_pd["target"]
     )
+    interaction_pd["index"] = interactions
     interaction_pd = interaction_pd.set_index("index")
-
     # New edges have no features
     sirna_edge_pd_no_feats = thermo_feats_pd[["source", "target"]]
     data1 = {
-        "source": list(interaction_pd.index),
+        "source": interactions,
         "target": sirna_edge_pd_no_feats["source"],
     }
     data2 = {
-        "source": list(interaction_pd.index),
+        "source": interactions,
         "target": sirna_edge_pd_no_feats["target"],
     }
 
@@ -193,36 +80,92 @@ def generate_model():
         [all_my_edges, all_my_edges_temp], ignore_index=True, axis=0
     )
 
-    # We want to predict the interaction weight, i.e. the label of interaction node
-    interaction_weight = sirna_efficacy_pd["efficacy"]
-    interaction_weight = interaction_weight.set_axis(interaction_pd.index)
-
+    # sizes of 1- and 2-hop neighbour samples for each hidden layer of the HinSAGE model
+    batch_size = 60
+    hop_samples = [8, 4]
+    # Merge all the edges
+    all_my_edges = pd.concat(
+        [all_my_edges, all_my_edges_temp], ignore_index=True, axis=0
+    )
     # Create Stellargraph object
-    my_stellar_graph = StellarGraph.StellarGraph(
-        {"siRNA": sirna_pd, "mRNA": mRNA_pd, "interaction": interaction_pd},
+    my_stellar_graph = stellargraph.StellarGraph(
+        {"siRNA": sirna_pd, "mRNA": mrna_pd, "interaction": interaction_pd},
         edges=all_my_edges,
         source_column="source",
         target_column="target",
     )
-
-    ################################################
-    # Create the model
-    ################################################
-
-    train_interaction, test_interaction = train_test_split(
-        interaction_weight, test_size=0.1, random_state=42
-    )
-
-    # sizes of 1- and 2-hop neighbour samples for each hidden layer of the HinSAGE model
-    batch_size = 60
-    hop_samples = [8, 4]
-    # Create the generators to feed data from the graph to the Keras model
     # We specify we want to make node regression on the "interaction" node
     generator = HinSAGENodeGenerator(
         my_stellar_graph, batch_size, hop_samples, head_node_type="interaction"
     )
+    return generator
 
-    train_gen = generator.flow(train_interaction.index, train_interaction, shuffle=True)
+
+def generate_model(
+    x_train,
+    y_train,
+    x_validate,
+    y_validate,
+    x_hold_out=None,
+    y_hold_out=None,
+    x_predict=None,
+):
+    """
+    Generates the GNN model and predicts on x_hold_out or x_predict.  For the former it is during
+    evaluation mode.
+    """
+    # k-mers of siRNA sequences
+    sirna_kmer_data = x_train["siRNA_kmers"]
+    sirna_kmer_data.extend(x_validate["siRNA_kmers"])
+
+    mrna_kmer_data = x_train["mRNA_kmers"]
+    mrna_kmer_data.extend(x_validate["mRNA_kmers"])
+
+    thermo_pd = pd.concat(
+        [x_train["Thermo_Features"], x_validate["Thermo_Features"]],
+        ignore_index=True,
+        sort=False,
+    )
+
+    # If we are doing hold-out cross validation, add these values for the genorator
+    if x_hold_out is not None:
+        sirna_kmer_data.extend(x_hold_out["siRNA_kmers"])
+        mrna_kmer_data.extend(x_hold_out["mRNA_kmers"])
+        thermo_pd = pd.concat(
+            [thermo_pd, x_hold_out["Thermo_Features"]], ignore_index=True, sort=False
+        )
+
+    if x_predict is not None:
+        sirna_kmer_data.extend(x_predict["siRNA_kmers"])
+        mrna_kmer_data.extend(x_predict["mRNA_kmers"])
+        thermo_pd = pd.concat(
+            [thermo_pd, x_predict["Thermo_Features"]], ignore_index=True, sort=False
+        )
+
+    sirna_pd = pd.DataFrame(data=sirna_kmer_data).drop_duplicates(subset=[0])
+    sirna_pd = sirna_pd.set_index(0)
+    # k-mers of mRNA sequences
+    mRNA_pd = pd.DataFrame(data=mrna_kmer_data).drop_duplicates(subset=[0])
+    mRNA_pd = mRNA_pd.set_index(0)
+    generator = create_generator(thermo_pd, sirna_pd, mRNA_pd)
+
+    interactions_train = list(
+        x_train["Thermo_Features"].iloc[:, 0].astype(str)
+        + "_"
+        + x_train["Thermo_Features"].iloc[:, 1]
+    )
+    train_gen = generator.flow(interactions_train, y_train, shuffle=True)
+
+    interactions_validate = list(
+        x_validate["Thermo_Features"].iloc[:, 0].astype(str)
+        + "_"
+        + x_validate["Thermo_Features"].iloc[:, 1]
+    )
+    validate_gen = generator.flow(interactions_validate, y_validate, shuffle=False)
+
+    ################################################
+    # Create the model
+    ################################################
 
     # two hidden layers HinSAGE sizes
     hinsage_layer_sizes = [32, 16]
@@ -243,238 +186,273 @@ def generate_model():
     # Train the model, keeping track of its loss and accuracy on the training set,
     # and its generalisation performance on the test set
 
-    test_gen = generator.flow(test_interaction.index, test_interaction)
-
-    reduce_lr = callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10)
-    early_stop = callbacks.EarlyStopping(monitor="val_loss", patience=15)
-    # save_best = callbacks.ModelCheckPoint(filepath=, monitor="val_mse", mode="min", save_best_only=True)
+    reduce_lr = ReduceLROnPlateauWithBestWeights(
+        monitor="val_loss", factor=0.5, patience=10
+    )
+    early_stop = callbacks.EarlyStopping(
+        monitor="val_loss", patience=15, restore_best_weights=True
+    )
     model.fit(
         train_gen,
         epochs=1000,
-        validation_data=test_gen,
+        validation_data=validate_gen,
         verbose=2,
         shuffle=False,
         callbacks=[reduce_lr, early_stop],
     )
 
-    # Now we have trained the model we can evaluate on the test set.
-    pred = model.predict(test_gen)
+    if ARGS.evaluate:
+        interactions_hold_out = list(
+            x_hold_out["Thermo_Features"].iloc[:, 0].astype(str)
+            + "_"
+            + x_hold_out["Thermo_Features"].iloc[:, 1]
+        )
+        hold_out_gen = generator.flow(interactions_hold_out, shuffle=False)
 
-    mse_run = mean_squared_error(test_interaction, pred)
-    print("Model MSE: " + str(mse_run))
+        pred = model.predict(hold_out_gen).flatten()
+
+        r2 = r2_score(y_hold_out, pred)
+        mse = mean_squared_error(y_hold_out, pred)
+        pearson = scipy.stats.pearsonr(y_hold_out, pred)
+        pcc = pearson[0]
+
+        pred = model.predict(validate_gen).flatten()
+        r2_val = r2_score(y_validate, pred)
+        mse_val = mean_squared_error(y_validate, pred)
+        pearson_val = scipy.stats.pearsonr(y_validate, pred)
+        pcc_val = pearson_val[0]
+
+        print("Model R^2: " + str(r2))
+        print("Model MSE: " + str(mse))
+        print("Model PCC: " + str(pcc))
+        return r2, mse, pcc, r2_val, mse_val, pcc_val
+    if x_predict is not None:
+        interactions_predict = list(
+            x_predict["Thermo_Features"].iloc[:, 0].astype(str)
+            + "_"
+            + x_predict["Thermo_Features"].iloc[:, 1]
+        )
+        pred_gen = generator.flow(interactions_predict, shuffle=False)
+        pred = model.predict(pred_gen)
+        if ARGS.test:
+            print(
+                "MSE: "
+                + str(
+                    mean_squared_error(
+                        pd.read_csv("./data/raw/test/sirna_mrna_efficacy.csv").efficacy,
+                        pred,
+                    )
+                )
+            )
+        return [round(prediction, 5) for prediction in pred.flatten()]
     return model
 
 
-def predict(sirna_pd, mRNA_pd, thermo_feats_pd, model):
-    # rename first 2 columns in "source" and "target"
-    thermo_feats_pd.rename(columns={0: "source", 1: "target"}, inplace=True)
-    interaction_pd = thermo_feats_pd.drop(["source", "target"], axis=1)
-    interaction_pd["index"] = (
-        thermo_feats_pd["source"].astype(str) + "_" + thermo_feats_pd["target"]
-    )
-    interaction_pd = interaction_pd.set_index("index")
-    # New edges have no features
-    sirna_edge_pd_no_feats = thermo_feats_pd[["source", "target"]]
-    data1 = {
-        "source": list(interaction_pd.index),
-        "target": sirna_edge_pd_no_feats["source"],
-    }
-    data2 = {
-        "source": list(interaction_pd.index),
-        "target": sirna_edge_pd_no_feats["target"],
-    }
-
-    all_my_edges = pd.DataFrame(data1)
-    all_my_edges_temp = pd.DataFrame(data2)
-
-    # Merge all the edges
-    all_my_edges = pd.concat(
-        [all_my_edges, all_my_edges_temp], ignore_index=True, axis=0
-    )
-
-    batch_size = 60
-    hop_samples = [8, 4]
-    # Merge all the edges
-    all_my_edges = pd.concat(
-        [all_my_edges, all_my_edges_temp], ignore_index=True, axis=0
-    )
-    # Create Stellargraph object
-    my_stellar_graph = StellarGraph.StellarGraph(
-        {"siRNA": sirna_pd, "mRNA": mRNA_pd, "interaction": interaction_pd},
-        edges=all_my_edges,
-        source_column="source",
-        target_column="target",
-    )
-    # We specify we want to make node regression on the "interaction" node
-    generator = HinSAGENodeGenerator(
-        my_stellar_graph, batch_size, hop_samples, head_node_type="interaction"
-    )
-    test_gen = generator.flow(interaction_pd.index, shuffle=False)
-    pred = model.predict(test_gen)
-    if ARGS.test:
-        print(
-            "MSE: "
-            + str(
-                mean_squared_error(
-                    pd.read_csv("./data/raw/test/sirna_mrna_efficacy.csv").efficacy,
-                    pred,
-                )
-            )
+class ReduceLROnPlateauWithBestWeights(callbacks.ReduceLROnPlateau):
+    def __init__(
+        self,
+        monitor="val_loss",
+        factor=0.1,
+        patience=10,
+        verbose=0,
+        mode="auto",
+        min_delta=1e-4,
+        cooldown=0,
+        min_lr=0,
+        restore_best_weights=True,
+    ):
+        super().__init__(
+            monitor=monitor,
+            factor=factor,
+            patience=patience,
+            verbose=verbose,
+            mode=mode,
+            min_delta=min_delta,
+            cooldown=cooldown,
+            min_lr=min_lr,
         )
-    return pred
+        self.restore_best_weights = restore_best_weights
+        self.best_weights = None
+        self.best_loss = np.inf if self.mode == "min" else -np.inf
+
+    def on_train_begin(self, logs=None):
+        self.best_weights = None
+        self.best_loss = np.inf if self.mode == "min" else -np.inf
+        super().on_train_begin(logs)
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        current_loss = logs.get(self.monitor)
+
+        if current_loss is None:
+            return
+
+        # Save best weights
+        if (self.mode == "min" and current_loss < self.best_loss - self.min_delta) or (
+            self.mode == "max" and current_loss > self.best_loss + self.min_delta
+        ):
+            self.best_loss = current_loss
+            self.best_weights = self.model.get_weights()
+
+        old_lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+        super().on_epoch_end(epoch, logs)
+        new_lr = float(tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+
+        # Restore best weights if LR is reduced
+        if (
+            self.restore_best_weights
+            and new_lr < old_lr
+            and self.best_weights is not None
+        ):
+            if self.verbose > 0:
+                print("Restoring best weights from epoch with lowest monitored loss")
+            self.model.set_weights(self.best_weights)
 
 
-def find_rnaup(sirna_seq_sense, mrna_seq):
-    couple = mrna_seq + "\n" + sirna_seq_sense
-    # calling RNAup with some specifics
-    proc = subprocess.Popen(
-        ["RNAup", "-b", "-d2", "--noLP", "-o", "-c", "'S'", "RNAup.out"],
-        stdout=subprocess.PIPE,
-        stdin=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    try:
-        outs, errs = proc.communicate(input=couple.encode(encoding="utf-8"))
-        start = " ("
-        end = ")\n"
-        s = outs.decode(encoding="utf-8")
-        s = s[s.find(start) + len(start) : s.rfind(end)]
-        s = s.replace("=", "").replace("+", "")
-        s = list(map(float, s.split()))
-        return [s[0], s[2], s[3]]
-
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        outs, errs = proc.communicate()
-        return None
+def create_thermo_pd_row(sirna_mrna):
+    sirna, mrna = sirna_mrna
+    return sirna.thermo_features(mrna)
 
 
-def cal_thermo_feature(
-    sequence, intermolecular_initiation=4.09, symmetry_correction=0.43
+def evaluate_model(
+    thermo_features_file, siRNA_antisense_fasta_file, mRNA_fasta_file, efficacy_file
 ):
-    sum_stability = 0
-    single_sum = []
-
-    bimers = build_kmers(sequence)
-
-    if sequence[0] == "A":
-        sum_stability += 0.45
-    if sequence[18] == "U":
-        sum_stability += 0.45
-
-    for b in bimers:
-        bimer_values = {
-            "AA": -0.93,
-            "UU": -0.93,
-            "AU": -1.10,
-            "UA": -1.33,
-            "CU": -2.08,
-            "AG": -2.08,
-            "CA": -2.11,
-            "UG": -2.11,
-            "GU": -2.24,
-            "AC": -2.24,
-            "GA": -2.35,
-            "UC": -2.35,
-            "CG": -2.36,
-            "GG": -3.26,
-            "CC": -3.26,
-            "GC": -3.42,
-        }
-        stability_value = bimer_values.get(b, 0)
-        single_sum.append(stability_value)
-        sum_stability += stability_value
-
-    sum_stability += intermolecular_initiation
-    sum_stability += symmetry_correction
-    single_sum.append(sum_stability)
-
-    return single_sum
-
-
-def create_thermo_pd_row(sequence_info):
-    sirna_id, mrna_id, sirna_seq_sense, mrna_sequence = sequence_info
-    row = [sirna_id, mrna_id]
-    row.extend(cal_thermo_feature(sirna_seq_sense.reverse_complement_rna()[:19]))
-    row.extend(find_rnaup(sirna_seq_sense, mrna_sequence))
-    return row
-
-
-def main():
-    k_sirna = 3
-    k_mrna = 4
-    kmer_sirna = kmer_featurization(k_sirna)
-    kmer_mrna = kmer_featurization(k_mrna)
-
-    sirna_kmers_data = []
-    mrna_kmers_data = []
-
-    if ARGS.test:
-        mrna_fasta_file = Path("./data/raw/test/mRNA_1.fas")
-        sirna_fasta_file = Path("./data/raw/test/sirna_1.fas")
-        sirna_mrna_csv_file = Path("./data/raw/test/sirna_mrna_efficacy.csv")
+    x, y, split_indexes, sirna_mrna = get_split_data(
+        thermo_features_file,
+        siRNA_antisense_fasta_file,
+        mRNA_fasta_file,
+        efficacy_file,
+        folds=6,
+        by_gene=not ARGS.random_split,
+    )
+    if ARGS.random_split:
+        results_file_path = Path("./accuracy.random.csv")
     else:
-        if ARGS.mrna_fasta is None:
-            raise ValueError("mrna_fasta input required")
-        if ARGS.sirna_fasta is None:
-            raise ValueError("sirna_fasta input required")
-        if ARGS.sirna_mrna_csv is None:
-            raise ValueError("sirna_mrna_csv input required")
-        mrna_fasta_file = Path(ARGS.mrna_fasta)
-        sirna_fasta_file = Path(ARGS.sirna_fasta)
-        sirna_mrna_csv_file = Path(ARGS.sirna_mrna_csv)
+        results_file_path = Path("./accuracy.gene.csv")
+
+    with open(results_file_path, "w") as results_file:
+        results_file.write(
+            "HoldOut,Validation,R2_HoldOut,MSE_HoldOut,PCC_HoldOut,R2_Validation,MSE_Validation,PCC_Validation\n"
+        )
+
+    for hold_out_set, hold_out_indexes in enumerate(split_indexes):
+        for validation_set, validation_indexes in enumerate(split_indexes):
+            if hold_out_set != validation_set:
+                train_indexes = [
+                    not hold_out and not validation
+                    for hold_out, validation in zip(
+                        hold_out_indexes, validation_indexes
+                    )
+                ]
+                x_train, x_validate, x_hold_out = (
+                    index_x(x, train_indexes, sirna_mrna),
+                    index_x(x, validation_indexes, sirna_mrna),
+                    index_x(x, hold_out_indexes, sirna_mrna),
+                )
+                y_train, y_validate, y_hold_out = (
+                    y[train_indexes],
+                    y[validation_indexes],
+                    y[hold_out_indexes],
+                )
+
+                r2, mse, pcc, r2_val, mse_val, pcc_val = generate_model(
+                    x_train, y_train, x_validate, y_validate, x_hold_out, y_hold_out
+                )
+
+                with open(results_file_path, "a") as results_file:
+                    results_file.write(
+                        f"{hold_out_set + 1},{validation_set + 1},{r2},{mse},{pcc},{r2_val},{mse_val},{pcc_val}\n"
+                    )
+
+
+def prepare_prediction_data():
+    if ARGS.test:
+        return (
+            Path("./data/raw/test/mRNA_1.fas"),
+            Path("./data/raw/test/sirna_1.fas"),
+            Path("./data/raw/test/sirna_mrna_efficacy.csv"),
+        )
+    if not ARGS.mrna_fasta or not ARGS.sirna_fasta or not ARGS.sirna_mrna_csv:
+        raise ValueError(
+            "mrna_fasta, sirna_fasta, and sirna_mrna_csv inputs are required"
+        )
+    return Path(ARGS.mrna_fasta), Path(ARGS.sirna_fasta), Path(ARGS.sirna_mrna_csv)
+
+
+def load_sequence_data(sirna_fasta_file, mrna_fasta_file):
+    sirna_records, sirna_kmers_data = {}, []
+    for seq_record in SeqIO.parse(sirna_fasta_file, "fasta"):
+        sirna = siRNA(seq_record)
+        sirna_records[sirna.id] = sirna
+        sirna_kmers_data.append(sirna.kmer_data())
+
+    mrna_records, mrna_kmers_data = {}, []
+    for seq_record in SeqIO.parse(mrna_fasta_file, "fasta"):
+        mrna = mRNA(seq_record)
+        mrna_records[mrna.id] = mrna
+        mrna_kmers_data.append(mrna.kmer_data())
+
+    return sirna_records, sirna_kmers_data, mrna_records, mrna_kmers_data
+
+
+def predict_efficacy(
+    thermo_features_file, siRNA_antisense_fasta_file, mRNA_fasta_file, efficacy_file
+):
+    mrna_fasta_file, sirna_fasta_file, sirna_mrna_csv_file = prepare_prediction_data()
     source_target = pd.read_csv(sirna_mrna_csv_file)
 
-    source_target_dict = {
-        siRNA: target
-        for siRNA, target in zip(source_target.iloc[:, 0], source_target.iloc[:, 1])
-    }
-    mrna_records = {}
-    for seq_record in SeqIO.parse(mrna_fasta_file, "fasta"):
-        mrna_records[seq_record.id] = seq_record.seq.back_transcribe().upper()
+    sirna_records, sirna_kmers_data, mrna_records, mrna_kmers_data = load_sequence_data(
+        sirna_fasta_file, mrna_fasta_file
+    )
 
-    sequence_info = []
-    # create sirna k-mer file
-    for seq_record in SeqIO.parse(sirna_fasta_file, "fasta"):  # input fasta file
-        rna_id = seq_record.id
-        sirna_antisense = seq_record.seq.back_transcribe().upper()
-        k = kmer_sirna.obtain_kmer_feature_for_one_sequence(sirna_antisense, True)
-        k = [int(elem) for elem in k]
-        k = [str(elem) for elem in k]
-        k.insert(0, str(rna_id))
-        sirna_kmers_data.append(k)
+    sirna_mrna = [
+        (sirna_records[sirna_id], mrna_records[mrna_id])
+        for sirna_id, mrna_id in zip(source_target.iloc[:, 0], source_target.iloc[:, 1])
+    ]
 
-        sirna_sense = sirna_antisense.reverse_complement()
-        mrna_id = source_target_dict[rna_id]
-        mrna_seq = mrna_records[mrna_id]
-        if sirna_sense in mrna_seq:
-            sequence_info.append([rna_id, mrna_id, sirna_sense, mrna_seq])
-
-    # python bash script to calculate all the interactions
-    print("\nFinding thermo properties.  May take awhile\n")
+    print("Finding thermo properties. This may take a while")
     with Pool(ARGS.threads) as pool:
-        thermo_rows = pool.map(create_thermo_pd_row, sequence_info)
+        thermo_rows = pool.map(create_thermo_pd_row, sirna_mrna)
 
-    thermo_feats_pd = pd.DataFrame(thermo_rows)
+    x_train, y_train, x_validate, y_validate = get_split_data_gene_model(
+        thermo_features_file, siRNA_antisense_fasta_file, mRNA_fasta_file, efficacy_file
+    )
 
-    # create mRNA k-mer file
-    for mrna_id, mrna_seq in mrna_records.items():
-        k = kmer_mrna.obtain_kmer_feature_for_one_sequence(mrna_seq, True)
-        k = [int(elem) for elem in k]
-        k = [str(elem) for elem in k]
-        k.insert(0, str(mrna_id))
-        mrna_kmers_data.append(k)
+    x_predict = {
+        "Thermo_Features": pd.DataFrame(thermo_rows),
+        "siRNA_kmers": pd.DataFrame(sirna_kmers_data),
+        "mRNA_kmers": pd.DataFrame(mrna_kmers_data),
+    }
 
-    source_target["Efficacy_Prediction"] = predict(
-        pd.DataFrame(data=sirna_kmers_data).set_index(0),
-        pd.DataFrame(data=mrna_kmers_data).set_index(0),
-        thermo_feats_pd,
-        generate_model(),
+    source_target["Efficacy_Prediction"] = generate_model(
+        x_train, y_train, x_validate, y_validate, x_predict=x_predict
     )
 
     if not ARGS.test:
         source_target.to_csv(
             sirna_mrna_csv_file.with_suffix(".prediction.csv"), index=False
+        )
+
+
+def main():
+    thermo_features_file = Path("./data/processed/HUVKS/thermo_features.csv")
+    siRNA_antisense_fasta_file = Path("./data/raw/HUVKS/siRNA.fa")
+    mRNA_fasta_file = Path("./data/raw/HUVKS/mrna.fa")
+    efficacy_file = Path("./data/raw/HUVKS/sirna_mrna_efficacy.csv")
+
+    if ARGS.evaluate:
+        evaluate_model(
+            thermo_features_file,
+            siRNA_antisense_fasta_file,
+            mRNA_fasta_file,
+            efficacy_file,
+        )
+    else:
+        predict_efficacy(
+            thermo_features_file,
+            siRNA_antisense_fasta_file,
+            mRNA_fasta_file,
+            efficacy_file,
         )
 
 
