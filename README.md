@@ -1,74 +1,104 @@
-# GNN4siRNA-predict
-Original code from here: https://github.com/BCB4PM/GNN4siRNA  
-Original paper from here: https://pmc.ncbi.nlm.nih.gov/articles/PMC9696923/
+# GNN4siRNA-Predict  
 
-## Installation and requirements
-### requirements
-- ViennaRNA v2.7.0
-- python 3.6
-  - anaconda or pyenv installed
+This repository is a modified and improved version of the original **GNN4siRNA** model.  
+- **Original Code**: [GitHub Repository](https://github.com/BCB4PM/GNN4siRNA)  
+- **Original Paper**: [PubMed Central](https://pmc.ncbi.nlm.nih.gov/articles/PMC9696923/)  
 
-### Installation
-```
+## Installation & Requirements  
+
+### Prerequisites  
+- **ViennaRNA v2.7.0**  
+- **Python 3.6** (with either Anaconda or Pyenv)  
+
+### Installation  
+
+Using **Conda**:  
+```bash
 conda create --name rnai python=3.6
 conda activate rnai
-```
-or  
-```
+```  
+
+Using **Pyenv**:  
+```bash
 pyenv install 3.6.13
 pyenv virtualenv 3.6.13 rnai
 pyenv activate rnai
-```
-After within the new virtual envirnment:  
-`pip install -r requirements.txt`
+```  
 
-## Model Creation & Prediction
+After setting up the virtual environment, install the required dependencies:  
+```bash
+pip install -r requirements.txt
+```  
 
-The original code lacked functionality for creating the model and making predictions on new data. Due to compatibility challenges with StellarGraph, saving and reloading the model for later predictions caused multiple issues.
+## Model Creation & Prediction  
 
-To address this, the provided script creates the model and performs predictions within the same execution. Since model creation is not computationally intensive, this approach ensures smooth operation. Additionally, model optimization has been incorporated into the original model generation. The most time-consuming step will be running ViennaRNA.
+The original code lacked functionality for **creating the model** and **making predictions on new data**. Additionally, saving and reloading models using StellarGraph caused compatibility issues.  
 
-## Usage
+### Enhancements in this Version:  
+- **Model Creation & Prediction Combined**: Both are executed in a single run to avoid reloading issues.  
+- **Model Optimization Integrated**: Optimizations are applied during model generation.  
+  - Convergence is allowed and optimized with a custum reduce learning rate function that restores best weights on reduction.
+- **ViennaRNA Execution**: The most computationally intensive step, but necessary for accurate results.  
+  - Correct strand usage for Gibbs Free energy calculations.  The original paper used the incorrect sense siRNA strand for mRNA binding.
 
-Run the following command within the previously created environment:  
-  
-```
+## Usage  
+
+Run the following command within the virtual environment:  
+```bash
 python predict.py --sirna_fasta <siRNA_fasta_file> --mrna_fasta <mRNA_fasta_file> --sirna_mrna_csv <csv_file>
 ```  
-  
-Where `<csv_file>` is a CSV file with two columns:
 
-- siRNA: The siRNA name as used in the FASTA file in the same order as the FASTA file.
-- mRNA: The corresponding mRNA target name from the mRNA FASTA file.
+### Input File Requirements  
+The `<csv_file>` must contain two columns:  
+- **siRNA**: Names of siRNA sequences, matching the FASTA file order.  
+- **mRNA**: Corresponding mRNA target names from the mRNA FASTA file.  
 
-This ensures correct pairing between siRNA sequences and their target mRNAs for prediction.  
-The output will be to `<csv_file>.prediction.csv`
+### Output  
+The script will generate predictions and save them as:  
+```bash
+<csv_file>.prediction.csv
+```  
 
-## Evaluation
+## Model Evaluation  
 
-Model evaluation was added with comparing two different data split methods:
-- Split by gene
-- Split randomly as in the original code and paper  
+### Evaluation Methods Added  
+This version includes an improved evaluation strategy that compares two data split approaches:  
+1. **Split by Gene** (Prevents information leakage and improves generalizability).  
+2. **Random Split** (As used in the original code and paper).  
 
-Additionally, a hold out set is used to evaluate the model, which is done with a 6 fold strategy where one fold is the hold-out, one is the validation set, and the rest are for the training set.  This creates 30 MSE, R2, and PCC values: 6 hold-outs x 5 fold cross validation.  
-To run validation with splitting by gene:    
-```
+Additionally, a **hold-out set evaluation** is performed using a **6-fold strategy**:  
+- **1 Fold**: Hold-out set  
+- **1 Fold**: Validation set  
+- **4 Folds**: Training set  
+- This results in **30 MSE, R², and PCC values** (6 hold-outs × 5-fold cross-validation).  
+
+### Running Evaluations  
+
+To evaluate the model **by gene split**:  
+```bash
 python predict.py --evaluate
-```
-To run validation with random splitting:     
-```
+```  
+
+To evaluate the model **with random splitting**:  
+```bash
 python predict.py --evaluate --random_split
-```
-## Original text
-Original code from here: https://github.com/BCB4PM/GNN4siRNA  
-Original paper from here: https://pmc.ncbi.nlm.nih.gov/articles/PMC9696923/
+```  
 
-GNN approach to face with the problem of siRNA-mRNA efficacy prediction.
+### Evaluation Results  
 
-This repository provides the source code for "A graph neural network approach for the analysis of siRNA-target biological networks".
+#### Random Split Evaluation  
+![Random Split Results](./accuracy.random.svg)  
 
-- The "**data**" Folder contains both "raw" and "processed" data. We reported three siRNA-mRNA interaction network datasets from 702 to 3518 interactions.
+#### Gene-Based Split Evaluation  
+![Gene Split Results](./accuracy.gene.svg)  
 
-- The "**preprocessing**" folder contains five scripts we released for transforming raw data into the input of our model. It also includes a "params.py" file with paths of input files and other parameters.
+#### Key Findings:  
+- **Random Splitting (Validation R² ≈ 0.47)**: Matches the original paper’s results.  
+- **Hold-out Set Evaluation (R² ≈ -0.058)**: Performance drops significantly when predicting on unseen genes.  
 
-- The "**model**" folder contains the main script "GNN4siRNA.py" for predicting siRNA-mRNA interactions. Once again, the "params.py" file contains all the parameters reported in the paper. Results of this script are given in terms of *Pearson correlation coefficient* and *mean squared error*.
+#### Interpretation:  
+Since the model is based on a **graph architecture** where siRNA and mRNA are treated as **nodes** with interactions as **edges**, it struggles to generalize when encountering genes it hasn't seen before. **This suggests that the model is best suited for predicting efficacy when the target gene is present in the training dataset.**  
+
+---  
+
+This improved version ensures **better generalization, proper model evaluation, and the ability to make new predictions.** More improvements coming soon.  
