@@ -420,8 +420,8 @@ def predict_efficacy(
 
     x_predict = {
         "Thermo_Features": pd.DataFrame(thermo_rows),
-        "siRNA_kmers": pd.DataFrame(sirna_kmers_data),
-        "mRNA_kmers": pd.DataFrame(mrna_kmers_data),
+        "siRNA_kmers": sirna_kmers_data,
+        "mRNA_kmers": mrna_kmers_data,
     }
 
     source_target["Efficacy_Prediction"] = generate_model(
