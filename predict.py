@@ -43,7 +43,7 @@ def arguments():
     args.add_argument(
         "--evaluate",
         action="store_true",
-        help="Test code",
+        help="Evaluate the model",
     )
     args.add_argument(
         "--random_split",
