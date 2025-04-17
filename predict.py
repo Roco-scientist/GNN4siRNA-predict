@@ -420,8 +420,8 @@ def predict_efficacy(
 
     x_predict = {
         "Thermo_Features": pd.DataFrame(thermo_rows),
-        "siRNA_kmers": pd.DataFrame(sirna_kmers_data),
-        "mRNA_kmers": pd.DataFrame(mrna_kmers_data),
+        "siRNA_kmers": sirna_kmers_data,
+        "mRNA_kmers": mrna_kmers_data,
     }
 
     source_target["Efficacy_Prediction"] = generate_model(
@@ -435,10 +435,10 @@ def predict_efficacy(
 
 
 def main():
-    thermo_features_file = Path("./data/processed/HUVKS/thermo_features.csv")
-    siRNA_antisense_fasta_file = Path("./data/raw/HUVKS/siRNA.fa")
-    mRNA_fasta_file = Path("./data/raw/HUVKS/mrna.fa")
-    efficacy_file = Path("./data/raw/HUVKS/sirna_mrna_efficacy.csv")
+    thermo_features_file = Path("./data/processed/HKKRSU/thermo_features.csv")
+    siRNA_antisense_fasta_file = Path("./data/raw/HKKRSU/siRNA.fa")
+    mRNA_fasta_file = Path("./data/raw/HKKRSU/mrna.fa")
+    efficacy_file = Path("./data/raw/HKKRSU/sirna_mrna_efficacy.csv")
 
     if ARGS.evaluate:
         evaluate_model(
