@@ -435,10 +435,10 @@ def predict_efficacy(
 
 
 def main():
-    thermo_features_file = Path("./data/processed/HKKRSU/thermo_features.csv")
-    siRNA_antisense_fasta_file = Path("./data/raw/HKKRSU/siRNA.fa")
-    mRNA_fasta_file = Path("./data/raw/HKKRSU/mrna.fa")
-    efficacy_file = Path("./data/raw/HKKRSU/sirna_mrna_efficacy.csv")
+    thermo_features_file = Path("./data/processed/HKRSU/thermo_features.csv")
+    siRNA_antisense_fasta_file = Path("./data/raw/HKRSU/siRNA.fa")
+    mRNA_fasta_file = Path("./data/raw/HKRSU/mrna.fa")
+    efficacy_file = Path("./data/raw/HKRSU/sirna_mrna_efficacy.csv")
 
     if ARGS.evaluate:
         evaluate_model(
