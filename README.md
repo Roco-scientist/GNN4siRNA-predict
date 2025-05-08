@@ -93,7 +93,7 @@ python predict.py --evaluate --random_split
 ![Gene Split Results](./accuracy.gene.svg)  
 
 #### Gibbs Fee Energy Evaluation
-![Gibbs Free Energy Comparison]('./La Rosa Gibbs Fig.png')
+![Gibbs Free Energy Comparison](./La_Rosa_Gibbs_Fig.png)
 (A) X-axis represents Gibbs Free Energy recalculated for either the sense or the antisense siRNA, colored Red and Blue. Y-axis represents the Gibbs Free Energy given by the original authors.  There is a perfect correlation with the Sense strand siRNA calculations.
 (B) Length of identified mRNA binding site for the given siRNA, either sense or antisense.  Antisense shows a median binding site of 21 nucleotides, the expected length, indicating that antisense strand should be used as input into RNAup Gibbs Free energy calculations.
 
