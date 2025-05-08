@@ -33,23 +33,29 @@ def main():
         sirna = sirnas[sirna_id]
         mrna = mrnas[sirna_info[sirna_id]["mRNA"]]
         if sirna.seq.transcribe() in mrna.seq:  # siRNA strand is sense
-            sirna._rnaup(mrna, extension=None)
+            sirna._rnaup(mrna, extension=None, extra=True)
             sense_gibbs = sirna.thermo_row[-3]
+            sense_mrna_match = sirna.mrna_sequence_match
             sirna.seq = sirna.seq.reverse_complement_rna()
-            sirna._rnaup(mrna, extension=None)
+            sirna._rnaup(mrna, extension=None, extra=True)
             antisense_gibbs = sirna.thermo_row[-3]
+            antisense_mrna_match = sirna.mrna_sequence_match
+            antisense_sirna_seq = sirna.seq
         elif sirna.seq.reverse_complement() in mrna.seq:  # siRNA strand is antisense
-            sirna._rnaup(mrna, extension=None)
+            sirna._rnaup(mrna, extension=None, extra=True)
             antisense_gibbs = sirna.thermo_row[-3]
+            antisense_mrna_match = sirna.mrna_sequence_match
+            antisense_sirna_seq = sirna.seq
             sirna.seq = sirna.seq.reverse_complement_rna()
-            sirna._rnaup(mrna, extension=None)
+            sirna._rnaup(mrna, extension=None, extra=True)
             sense_gibbs = sirna.thermo_row[-3]
+            sense_mrna_match = sirna.mrna_sequence_match
         else:
             raise ValueError(
                 f"siRNA ({sirna.id}) sequence not found in mRNA ({mrna.id})"
             )
         gibbs_free_energy_values.append(
-            (sense_gibbs, antisense_gibbs, sirna_info[sirna_id]["Gibbs"])
+            (sense_gibbs, antisense_gibbs, sirna_info[sirna_id]["Gibbs"], antisense_sirna_seq, sense_mrna_match, antisense_mrna_match)
         )
     pd.DataFrame(
         data=gibbs_free_energy_values,
@@ -57,6 +63,9 @@ def main():
             "Sense_siRNA_Gibbs_Free_Energy",
             "Antisense_siRNA_Gibbs_Free_Energy",
             "LaRosa_Gibbs_Free_Energy",
+            "Anisense_siRNA_sequence",
+            "Sense_siRNA_matching_mRNA_sequence",
+            "Antisense_siRNA_matching_mRNA_sequence",
         ],
     ).to_csv("LaRosa_Gibbs.csv", index=False)
 

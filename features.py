@@ -1,5 +1,6 @@
 import numpy as np
 import subprocess
+import re
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
@@ -115,8 +116,10 @@ class siRNA(kmer_featurization):
         self.seq = seq_record_antisense.seq.transcribe().upper()[: self.max_sirna_len]
         self.id = seq_record_antisense.id
         self.thermo_row = []
+        self.mrna_match = None
+        self.mrna_sequence_match = None
 
-    def _rnaup(self, mrna, extension=500):
+    def _rnaup(self, mrna, extension=500, extra=False):
         if extension is not None:
             mrna.reduce_mrna(self, extension=extension)
         couple = str(mrna.seq) + "\n" + str(self.seq)
@@ -128,15 +131,24 @@ class siRNA(kmer_featurization):
             stderr=subprocess.PIPE,
         )
         outs, errs = proc.communicate(input=couple.encode(encoding="utf-8"))
-        start = " ("
-        end = ")\n"
-        s = outs.decode(encoding="utf-8")
-        s = s[s.find(start) + len(start) : s.rfind(end)]
-        s = s.replace("=", "").replace("+", "")
+        # start = " ("
+        # end = ")\n"
+        results = outs.decode(encoding="utf-8")
+        pattern = r'(?P<mrna_location>\b\d+,\d+\b) *: *(?P<sirna_location>\b\d+,\d+\b) *\((?P<gibbs>-?\d+\.\d+\s*=\s*-?\d+\.\d+(?:\s*\+\s*-?\d+\.\d+)*)\)\n(?P<rna>[AUCGT&]+)'
+        matches = re.search(pattern, results, re.MULTILINE)
+        if matches is None:
+            raise ValueError(f"Regex pattern not found in RNAup results\nPattern: {pattern}\nRNAup results: {results}")
+        # gibbs_results = results[results.find(start) + len(start) : results.rfind(end)]
+        gibbs_results = matches.group('gibbs')
+        gibbs_results = gibbs_results.replace("=", "").replace("+", "")
         dGtotal, dGinteraction, dGmrna_opening, dGrnai_opening = list(
-            map(float, s.split())
+            map(float, gibbs_results.split())
         )
         self.thermo_row.extend([dGtotal, dGmrna_opening, dGrnai_opening])
+        if extra:
+            mrna_location = matches.group("mrna_location").split(",")
+            self.mrna_match = (int(mrna_location[0]), int(mrna_location[1]))
+            self.mrna_sequence_match = matches.group("rna").split("&")[0]
 
     def thermo_features(self, mrna: mRNA, include_index=True):
         if len(self.thermo_row) == 0:
