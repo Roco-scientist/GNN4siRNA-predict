@@ -92,6 +92,11 @@ python predict.py --evaluate --random_split
 #### Gene-Based Split Evaluation  
 ![Gene Split Results](./accuracy.gene.svg)  
 
+#### Gibbs Fee Energy Evaluation
+![Gibbs Free Energy Comparison](./La Rosa Gibbs Fig.png)
+(A) X-axis represents Gibbs Free Energy recalculated for either the sense or the antisense siRNA, colored Red and Blue. Y-axis represents the Gibbs Free Energy given by the original authors.  There is a perfect correlation with the Sense strand siRNA calculations.
+(B) Length of identified mRNA binding site for the given siRNA, either sense or antisense.  Antisense shows a median binding site of 21 nucleotides, the expected length, indicating that antisense strand should be used as input into RNAup Gibbs Free energy calculations.
+
 #### Key Findings:  
 - **Random Splitting (Validation R² ≈ 0.47)**: Matches the original paper’s results.  
 - **Gene Splitting (Hold-out R² ≈ -0.058)**: Performance drops significantly when predicting on unseen genes.  
@@ -99,10 +104,6 @@ python predict.py --evaluate --random_split
 #### Interpretation:  
 Since the model is based on a **graph architecture** where siRNA and mRNA are treated as **nodes** with interactions as **edges**, it struggles to generalize when encountering genes it hasn't seen before. **This suggests that the model is best suited for predicting efficacy when the target gene is present in the training dataset.**  
 
-### Gibbs Fee Energy Evaluation
-![Gibbs Free Energy Comparison](./La Rosa Gibbs Fig.png)
-(A) X-axis represents Gibbs Free Energy recalculated for either the sense or the antisense siRNA, colored Red and Blue. Y-axis represents the Gibbs Free Energy given by the original authors.  There is a perfect correlation with the Sense strand siRNA calculations.
-(B) Length of identified mRNA binding site for the given siRNA, either sense or antisense.  Antisense shows a median binding site of 21 nucleotides, the expected length, indicating that antisense strand should be used as input into RNAup Gibbs Free energy calculations.
 ---  
 
 This improved version ensures **better generalization, proper model evaluation, and the ability to make new predictions.** More improvements coming soon.  
