@@ -117,7 +117,8 @@ class siRNA(kmer_featurization):
         self.thermo_row = []
 
     def _rnaup(self, mrna, extension=500):
-        mrna.reduce_mrna(self, extension=extension)
+        if extension is not None:
+            mrna.reduce_mrna(self, extension=extension)
         couple = str(mrna.seq) + "\n" + str(self.seq)
         # calling RNAup with some specifics
         proc = subprocess.Popen(
